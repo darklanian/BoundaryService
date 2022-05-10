@@ -13,10 +13,11 @@
 
 #include "logger.h"
 #include "shader.h"
+#include "sphere.h"
 
 float boundary_bottom = -10.0f;
 float boundary_height = 30.0f;
-float boundary_scale = 50.0f;
+float boundary_scale = 10.0f;
 
 std::vector<float> boundary_points;
 std::vector<float> boundary_uv;
@@ -26,10 +27,9 @@ GLuint boundary_vbo;
 GLuint boundary_vbo_uv;
 
 GLuint program_grid;
-GLuint matrix_location_grid;
 
 GLuint program_surface;
-GLuint matrix_location_surface;
+GLint color_location;
 
 void add_point(float x, float y, float z) {
 	boundary_points.push_back(x);
@@ -87,10 +87,8 @@ void load_boundary_geometry() {
 
 void boundary_init(AAssetManager* am) {
 	program_grid = create_program(am, "grid.vertex.shader", "grid.fragment.shader");
-	matrix_location_grid = glGetUniformLocation(program_grid, "MVP");
-
 	program_surface = create_program(am, "surface.vertex.shader", "surface.fragment.shader");
-	matrix_location_surface = glGetUniformLocation(program_surface, "MVP");
+	color_location = glGetUniformLocation(program_surface, "vColor");
 
 	load_boundary_geometry();
 
@@ -109,6 +107,8 @@ void boundary_init(AAssetManager* am) {
 	glEnableVertexAttribArray(1);
 
 	glBindVertexArray(0);
+
+	sphere_init(am);
 }
 
 void boundary_deinit() {
@@ -117,31 +117,94 @@ void boundary_deinit() {
 	glDeleteVertexArrays(1, &boundary_vao);
 	glDeleteProgram(program_grid);
 	glDeleteProgram(program_surface);
+
+	sphere_deinit();
 }
 
-void boundary_draw(XrMatrix4x4f vp, GLuint program) {
+void boundary_draw(GLuint program, XrMatrix4x4f vp) {
 	glUseProgram(program);
 
-	XrVector3f translation {0.0f, 0.0f, 0.0f};
-	XrQuaternionf rotation {0.0f, 0.0f, 0.0f, 1.0f};
-	XrVector3f scale {1.0f, 1.0f, 1.0f};
-	XrMatrix4x4f model;
-	XrMatrix4x4f_CreateTranslationRotationScale(&model, &translation, &rotation, &scale);
-	XrMatrix4x4f mvp;
-	XrMatrix4x4f_Multiply(&mvp, &vp, &model);
-	glUniformMatrix4fv(matrix_location_grid, 1, GL_FALSE, reinterpret_cast<const GLfloat*>(&mvp));
+	glUniformMatrix4fv(2, 1, GL_FALSE, reinterpret_cast<const GLfloat*>(&vp));
 
 	glBindVertexArray(boundary_vao);
 	glDrawArrays(GL_TRIANGLE_STRIP, 0, boundary_points.size() / 3);
-
 	glBindVertexArray(0);
 }
 
 void boundary_draw_grid(XrMatrix4x4f vp) {
-	boundary_draw(vp, program_grid);
+	glUseProgram(program_grid);
+
+	glUniformMatrix4fv(2, 1, GL_FALSE, reinterpret_cast<const GLfloat*>(&vp));
+
+	glBindVertexArray(boundary_vao);
+	glDrawArrays(GL_TRIANGLE_STRIP, 0, boundary_points.size() / 3);
+	glBindVertexArray(0);
 }
 
+float c_white[] = {1.0f, 1.0f, 1.0f, 1.0f};
+float c_red[] = {1.0f, 0.0f, 0.0f, 1.0f};
+float c_green[] = {0.0f, 1.0f, 0.0f, 1.0f};
+float c_blue[] = {0.0f, 0.0f, 1.0f, 1.0f};
+float c_transparent[] = {0.0f, 0.0f, 0.0f, 0.0f};
+
+float debug_z = -10.0f;
+void set_debug_z(float z) { debug_z = z; }
+
+void draw_sphere_on_surface(XrMatrix4x4f vp, float s) {
+	XrVector3f translation {0.0f, 0.0f, debug_z};
+	XrQuaternionf rotation {0.0f, 0.0f, 0.0f, 1.0f};
+	XrVector3f scale {s, s, s};
+	XrMatrix4x4f model;
+	XrMatrix4x4f_CreateTranslationRotationScale(&model, &translation, &rotation, &scale);
+	XrMatrix4x4f mvp;
+	XrMatrix4x4f_Multiply(&mvp, &vp, &model);
+	glUniformMatrix4fv(2, 1, GL_FALSE, reinterpret_cast<const GLfloat*>(&mvp));
+
+	sphere_enable();
+
+	glDisable(GL_CULL_FACE);
+	glDepthMask(GL_FALSE);
+	glDepthFunc(GL_GREATER);
+	glEnable(GL_STENCIL_TEST);
+	glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
+	glStencilFunc(GL_ALWAYS, 1, 0xFF);
+	glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+
+	sphere_draw();
+
+	glDepthFunc(GL_LESS);
+	glStencilFunc(GL_NOTEQUAL, 0, 0xFF);
+	glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
+	glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+
+	sphere_draw();
+
+	glDepthMask(GL_TRUE);
+	glEnable(GL_CULL_FACE);
+	glDisable(GL_STENCIL_TEST);
+}
 
 void boundary_draw_surface(XrMatrix4x4f vp) {
-	boundary_draw(vp, program_surface);
+	glUseProgram(program_surface);
+
+	glUniformMatrix4fv(2, 1, GL_FALSE, reinterpret_cast<const GLfloat*>(&vp));
+	glUniform4fv(color_location, 1, c_white);
+
+	glDepthFunc(GL_LESS);
+	glEnable(GL_DEPTH_TEST);
+	glDepthMask(GL_TRUE);
+	glClear(GL_DEPTH_BUFFER_BIT);
+	glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+
+	glBindVertexArray(boundary_vao);
+	glDrawArrays(GL_TRIANGLE_STRIP, 0, boundary_points.size() / 3);
+	glBindVertexArray(0);
+	// boundary wall done
+
+	glUniform4fv(color_location, 1, c_red);
+	draw_sphere_on_surface(vp, 3.0f);
+	//glDisable(GL_BLEND);
+	glUniform4fv(color_location, 1, c_transparent);
+	draw_sphere_on_surface(vp, 2.5f);
+	//glEnable(GL_BLEND);
 }

@@ -4,6 +4,7 @@
 #include <GLES3/gl32.h>
 
 #include <cstring>
+#include <map>
 
 #include "xr.h"
 
@@ -31,7 +32,7 @@ std::vector<XrViewConfigurationView> configViews;
 std::vector<XrView> views;
 std::vector<Swapchain> swapchains;
 XrSwapchainImageOpenGLESKHR swapchainImages[2][3];
-
+std::map<uint32_t, uint32_t> colorToDepthMap;
 XrEventDataBuffer eventDataBuffer;
 
 bool initialized = false;
@@ -186,7 +187,43 @@ void xr_destroy() {
     if (instance != XR_NULL_HANDLE) xrDestroyInstance(instance);
 
     glDeleteFramebuffers(1, &swapchainFramebuffer);
+
+    for (auto& colorToDepth : colorToDepthMap) {
+        if (colorToDepth.second != 0) {
+            glDeleteTextures(1, &colorToDepth.second);
+        }
+    }
+
     opengles_deinit();
+}
+
+uint32_t GetDepthTexture(uint32_t colorTexture) {
+    // If a depth-stencil view has already been created for this back-buffer, use it.
+    auto depthBufferIt = colorToDepthMap.find(colorTexture);
+    if (depthBufferIt != colorToDepthMap.end()) {
+        return depthBufferIt->second;
+    }
+
+    // This back-buffer has no corresponding depth-stencil texture, so create one with matching dimensions.
+
+    GLint width;
+    GLint height;
+    glBindTexture(GL_TEXTURE_2D, colorTexture);
+    glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH, &width);
+    glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_HEIGHT, &height);
+
+    uint32_t depthTexture;
+    glGenTextures(1, &depthTexture);
+    glBindTexture(GL_TEXTURE_2D, depthTexture);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH24_STENCIL8, width, height, 0, GL_DEPTH_STENCIL, GL_UNSIGNED_INT_24_8, nullptr);
+
+    colorToDepthMap.insert(std::make_pair(colorTexture, depthTexture));
+
+    return depthTexture;
 }
 
 static void xr_render_view(const XrCompositionLayerProjectionView& layerView, XrSwapchainImageOpenGLESKHR* swapchainImage){
@@ -199,10 +236,10 @@ static void xr_render_view(const XrCompositionLayerProjectionView& layerView, Xr
                static_cast<GLsizei>(layerView.subImage.imageRect.extent.width),
                static_cast<GLsizei>(layerView.subImage.imageRect.extent.height));
 
-    //const uint32_t depthTexture = GetDepthTexture(colorTexture);
+    const uint32_t depthTexture = GetDepthTexture(colorTexture);
 
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, colorTexture, 0);
-    //glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, depthTexture, 0);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_TEXTURE_2D, depthTexture, 0);
 
     const auto& pose = layerView.pose;
     XrMatrix4x4f proj;

@@ -37,7 +37,7 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=gnu++11 -Wall -Werror")
 set(CMAKE_SHARED_LINKER_FLAGS
     "${CMAKE_SHARED_LINKER_FLAGS} -u ANativeActivity_onCreate")
 
-add_library(native-activity SHARED main.cpp render.cpp shader.cpp texture.cpp boundary.cpp xr.cpp)
+add_library(native-activity SHARED main.cpp render.cpp shader.cpp texture.cpp boundary.cpp sphere.cpp xr.cpp)
 
 add_dependencies(native-activity generate_openxr_header)
 

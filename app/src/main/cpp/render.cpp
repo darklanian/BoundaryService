@@ -14,6 +14,7 @@
 #include "texture.h"
 #include "boundary.h"
 
+
 void opengles_init(AAssetManager* am) {
     // Check openGL on the system
     auto opengl_info = {GL_VENDOR, GL_RENDERER, GL_VERSION, GL_EXTENSIONS};
@@ -25,11 +26,13 @@ void opengles_init(AAssetManager* am) {
 
     boundary_init(am);
 
+
     glLineWidth(10.0f);
 }
 
 void opengles_deinit() {
     boundary_deinit();
+
 }
 
 void opengles_render_view(XrMatrix4x4f vp) {
@@ -44,5 +47,7 @@ void opengles_render_view(XrMatrix4x4f vp) {
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
 
     boundary_draw_grid(vp);
-    //boundary_draw_surface(vp);
+
+    boundary_draw_surface(vp);
+
 }

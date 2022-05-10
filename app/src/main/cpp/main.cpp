@@ -181,12 +181,16 @@ static void engine_term_display(struct engine* engine) {
     engine->surface = EGL_NO_SURFACE;
 }
 
+void set_debug_z(float z);
 /**
  * Process the next input event.
  */
 static int32_t engine_handle_input(struct android_app* app, AInputEvent* event) {
     //auto* engine = (struct engine*)app->userData;
     if (AInputEvent_getType(event) == AINPUT_EVENT_TYPE_MOTION) {
+        int y = AMotionEvent_getY(event, 0);
+        float z = -100.0 * (float)y/1080;
+        set_debug_z(z);
         return 1;
     }
     return 0;
