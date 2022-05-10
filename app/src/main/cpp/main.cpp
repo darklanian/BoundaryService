@@ -39,47 +39,32 @@
 #include "xr.h"
 
 /**
- * Our saved state data.
- */
-struct saved_state {
-    float angle;
-    int32_t x;
-    int32_t y;
-};
-
-/**
  * Shared state for our app.
  */
 struct engine {
-    struct android_app* app;
-
     JavaVM* vm;
     jobject activity;
 
     AAssetManager* am;
 
-    int animating;
     EGLDisplay display;
     EGLSurface surface;
     EGLContext context;
     int32_t width;
     int32_t height;
-    struct saved_state state;
-
-    XRContext xr;
 };
 
 void get_asset_manager(struct engine* engine) {
     JNIEnv* env = nullptr;
-    engine->app->activity->vm->AttachCurrentThread(&env, nullptr);
+    engine->vm->AttachCurrentThread(&env, nullptr);
 
-    jclass activityClass = env->GetObjectClass(engine->app->activity->clazz);
+    jclass activityClass = env->GetObjectClass(engine->activity);
     jmethodID getAssets = env->GetMethodID(activityClass, "getAssets", "()Landroid/content/res/AssetManager;");
-    jobject assetManagerObject = env->CallObjectMethod(engine->app->activity->clazz, getAssets);
+    jobject assetManagerObject = env->CallObjectMethod(engine->activity, getAssets);
 
     engine->am = AAssetManager_fromJava(env, assetManagerObject);
 
-    engine->app->activity->vm->DetachCurrentThread();
+    engine->vm->DetachCurrentThread();
 }
 
 /**
@@ -98,6 +83,9 @@ static int engine_init_display(struct engine* engine) {
             EGL_BLUE_SIZE, 8,
             EGL_GREEN_SIZE, 8,
             EGL_RED_SIZE, 8,
+            EGL_ALPHA_SIZE, 8,
+            EGL_DEPTH_SIZE, 24,
+            EGL_STENCIL_SIZE, 8,
             EGL_NONE
     };
     EGLint w, h, format;
@@ -121,24 +109,8 @@ static int engine_init_display(struct engine* engine) {
     assert(supportedConfigs);
     eglChooseConfig(display, attribs, supportedConfigs.get(), numConfigs, &numConfigs);
     assert(numConfigs);
-    auto i = 0;
-    for (; i < numConfigs; i++) {
-        auto& cfg = supportedConfigs[i];
-        EGLint r, g, b, d;
-        if (eglGetConfigAttrib(display, cfg, EGL_RED_SIZE, &r)   &&
-            eglGetConfigAttrib(display, cfg, EGL_GREEN_SIZE, &g) &&
-            eglGetConfigAttrib(display, cfg, EGL_BLUE_SIZE, &b)  &&
-            eglGetConfigAttrib(display, cfg, EGL_DEPTH_SIZE, &d) &&
-            r == 8 && g == 8 && b == 8 && d == 0 ) {
 
-            config = supportedConfigs[i];
-            break;
-        }
-    }
-    if (i == numConfigs) {
-        config = supportedConfigs[0];
-    }
-
+    config = supportedConfigs[0];
     if (config == nullptr) {
         LOGW("Unable to initialize EGLConfig");
         return -1;
@@ -149,7 +121,7 @@ static int engine_init_display(struct engine* engine) {
      * As soon as we picked a EGLConfig, we can safely reconfigure the
      * ANativeWindow buffers to match, using EGL_NATIVE_VISUAL_ID. */
     eglGetConfigAttrib(display, config, EGL_NATIVE_VISUAL_ID, &format);
-    surface = eglCreateWindowSurface(display, config, engine->app->window, nullptr);
+    surface = eglCreateWindowSurface(display, config, nullptr, nullptr);
 
     const EGLint ctx_attribs[] = {
             EGL_CONTEXT_CLIENT_VERSION, 3,
@@ -171,7 +143,7 @@ static int engine_init_display(struct engine* engine) {
     engine->width = w;
     engine->height = h;
 
-    xr_init(&engine->xr, engine->vm, engine->activity, display, context, engine->am);
+    xr_init(engine->vm, engine->activity, engine->am);
 
     return 0;
 }
@@ -185,14 +157,14 @@ static void engine_draw_frame(struct engine* engine) {
         LOGE("No display");
         return;
     }
-    xr_render_frame(&engine->xr);
+    xr_render_frame();
 }
 
 /**
  * Tear down the EGL context currently associated with the display.
  */
 static void engine_term_display(struct engine* engine) {
-    xr_destroy(&engine->xr);
+    xr_destroy();
 
     if (engine->display != EGL_NO_DISPLAY) {
         eglMakeCurrent(engine->display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
@@ -204,7 +176,6 @@ static void engine_term_display(struct engine* engine) {
         }
         eglTerminate(engine->display);
     }
-    engine->animating = 0;
     engine->display = EGL_NO_DISPLAY;
     engine->context = EGL_NO_CONTEXT;
     engine->surface = EGL_NO_SURFACE;
@@ -214,9 +185,8 @@ static void engine_term_display(struct engine* engine) {
  * Process the next input event.
  */
 static int32_t engine_handle_input(struct android_app* app, AInputEvent* event) {
-    auto* engine = (struct engine*)app->userData;
+    //auto* engine = (struct engine*)app->userData;
     if (AInputEvent_getType(event) == AINPUT_EVENT_TYPE_MOTION) {
-        engine->animating = 1;
         return 1;
     }
     return 0;
@@ -226,13 +196,9 @@ static int32_t engine_handle_input(struct android_app* app, AInputEvent* event) 
  * Process the next main command.
  */
 static void engine_handle_cmd(struct android_app* app, int32_t cmd) {
-    auto* engine = (struct engine*)app->userData;
+    //auto* engine = (struct engine*)app->userData;
     switch (cmd) {
         case APP_CMD_SAVE_STATE:
-            // The system has asked us to save our current state.  Do so.
-            engine->app->savedState = malloc(sizeof(struct saved_state));
-            *((struct saved_state*)engine->app->savedState) = engine->state;
-            engine->app->savedStateSize = sizeof(struct saved_state);
             break;
         case APP_CMD_INIT_WINDOW:
             break;
@@ -260,16 +226,8 @@ void android_main(struct android_app* state) {
     state->userData = &engine;
     state->onAppCmd = engine_handle_cmd;
     state->onInputEvent = engine_handle_input;
-    engine.app = state;
     engine.vm = state->activity->vm;
     engine.activity = state->activity->clazz;
-    engine.animating = 1;
-
-
-    if (state->savedState != nullptr) {
-        // We are starting with a previous saved state; restore from it.
-        engine.state = *(struct saved_state*)state->savedState;
-    }
 
     get_asset_manager(&engine);
     engine_init_display(&engine);
@@ -298,8 +256,8 @@ void android_main(struct android_app* state) {
             }
         }
 
-        xr_handle_events(&engine.xr);
-        if (!engine.xr.is_session_running) {
+        xr_handle_events();
+        if (!xr_is_session_running()) {
             // Throttle loop since xrWaitFrame won't be called.
             std::this_thread::sleep_for(std::chrono::milliseconds(250));
             continue;
