@@ -31,6 +31,12 @@ GLuint program_grid;
 GLuint program_surface;
 GLint color_location;
 
+float hand_z = -17.0f;  // for debug
+void set_debug_z(float z) {
+	hand_z = z;
+	LOGI("hand_z = %f", hand_z);
+}
+
 void add_point(float x, float y, float z) {
 	boundary_points.push_back(x);
 	boundary_points.push_back(y);
@@ -121,20 +127,12 @@ void boundary_deinit() {
 	sphere_deinit();
 }
 
-void boundary_draw(GLuint program, XrMatrix4x4f vp) {
-	glUseProgram(program);
-
-	glUniformMatrix4fv(2, 1, GL_FALSE, reinterpret_cast<const GLfloat*>(&vp));
-
-	glBindVertexArray(boundary_vao);
-	glDrawArrays(GL_TRIANGLE_STRIP, 0, boundary_points.size() / 3);
-	glBindVertexArray(0);
-}
-
 void boundary_draw_grid(XrMatrix4x4f vp) {
 	glUseProgram(program_grid);
 
 	glUniformMatrix4fv(2, 1, GL_FALSE, reinterpret_cast<const GLfloat*>(&vp));
+	float handPosition[] = {0.0f, 0.0f, hand_z};
+	glUniform3fv(3, 1, handPosition);
 
 	glBindVertexArray(boundary_vao);
 	glDrawArrays(GL_TRIANGLE_STRIP, 0, boundary_points.size() / 3);
@@ -147,11 +145,8 @@ float c_green[] = {0.0f, 1.0f, 0.0f, 1.0f};
 float c_blue[] = {0.0f, 0.0f, 1.0f, 1.0f};
 float c_transparent[] = {0.0f, 0.0f, 0.0f, 0.0f};
 
-float debug_z = -10.0f;
-void set_debug_z(float z) { debug_z = z; }
-
 void draw_sphere_on_surface(XrMatrix4x4f vp, float s) {
-	XrVector3f translation {0.0f, 0.0f, debug_z};
+	XrVector3f translation {0.0f, 0.0f, hand_z};
 	XrQuaternionf rotation {0.0f, 0.0f, 0.0f, 1.0f};
 	XrVector3f scale {s, s, s};
 	XrMatrix4x4f model;
@@ -207,5 +202,18 @@ void boundary_draw_surface(XrMatrix4x4f vp) {
 
 	glUniform4fv(color_location, 1, c_transparent);
 	draw_sphere_on_surface(vp, 3.5f);
+
+	/*glClear(GL_DEPTH_BUFFER_BIT);
+	glUniform4fv(color_location, 1, c_green);
+	float s = 1.0f;
+	XrVector3f translation {0.0f, 0.0f, hand_z};
+	XrQuaternionf rotation {0.0f, 0.0f, 0.0f, 1.0f};
+	XrVector3f scale {s, s, s};
+	XrMatrix4x4f model;
+	XrMatrix4x4f_CreateTranslationRotationScale(&model, &translation, &rotation, &scale);
+	XrMatrix4x4f mvp;
+	XrMatrix4x4f_Multiply(&mvp, &vp, &model);
+	glUniformMatrix4fv(2, 1, GL_FALSE, reinterpret_cast<const GLfloat*>(&mvp));
+	sphere_draw();*/
 
 }

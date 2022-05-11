@@ -1,15 +1,17 @@
 #version 320 es
 precision mediump float;
-in vec2 UV;
+in vec2 st;
+in vec4 vColor;
 out vec4 color;
 void main() {
-    vec2 uv = UV/5.0;
+    float line_width_half = 0.05;
+    vec2 uv = st/5.0;
     vec2 mod = uv - floor(uv);
-    if (UV.y < 0.2) {
-        color = vec4(0.0, 1.0, 0.0, 1.0);
-    } else if ( (mod.x < 0.05 || mod.x > 0.95) || (mod.y < 0.05 || mod.y > 0.95) )
-        color = vec4(0.0, 0.0, 1.0, 1.0);
+    if (st.y < 0.2) {
+        color = vec4(0.0, 1.0, 0.0, 1.0); // floor - green
+    } else if ( (mod.x < line_width_half || mod.x > (1.0-line_width_half)) || (mod.y < line_width_half || mod.y > (1.0-line_width_half)) )
+        color = vColor;
     else
-        color = vec4(0.0, 0.0, 0.0, 0.0);
+        color = vec4(0.0, 0.0, 0.0, 0.0); // otherwise - transparent
 
 }
