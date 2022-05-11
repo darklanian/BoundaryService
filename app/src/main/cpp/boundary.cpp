@@ -17,7 +17,7 @@
 
 float boundary_bottom = -10.0f;
 float boundary_height = 30.0f;
-float boundary_scale = 10.0f;
+float boundary_scale = 30.0f;
 
 std::vector<float> boundary_points;
 std::vector<float> boundary_uv;
@@ -182,6 +182,7 @@ void draw_sphere_on_surface(XrMatrix4x4f vp, float s) {
 	glDepthMask(GL_TRUE);
 	glEnable(GL_CULL_FACE);
 	glDisable(GL_STENCIL_TEST);
+	glClear(GL_STENCIL_BUFFER_BIT);
 }
 
 void boundary_draw_surface(XrMatrix4x4f vp) {
@@ -202,9 +203,9 @@ void boundary_draw_surface(XrMatrix4x4f vp) {
 	// boundary wall done
 
 	glUniform4fv(color_location, 1, c_red);
-	draw_sphere_on_surface(vp, 3.0f);
-	//glDisable(GL_BLEND);
+	draw_sphere_on_surface(vp, 4.0f);
+
 	glUniform4fv(color_location, 1, c_transparent);
-	draw_sphere_on_surface(vp, 2.5f);
-	//glEnable(GL_BLEND);
+	draw_sphere_on_surface(vp, 3.5f);
+
 }
