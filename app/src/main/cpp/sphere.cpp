@@ -78,8 +78,6 @@ void sphere_deinit() {
 }
 
 void sphere_enable() {
-
-
     glBindVertexArray(sphere_vao);
 }
 

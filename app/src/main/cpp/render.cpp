@@ -32,7 +32,6 @@ void opengles_init(AAssetManager* am) {
 
 void opengles_deinit() {
     boundary_deinit();
-
 }
 
 void opengles_render_view(XrMatrix4x4f vp) {
@@ -49,5 +48,4 @@ void opengles_render_view(XrMatrix4x4f vp) {
     boundary_draw_grid(vp);
 
     boundary_draw_surface(vp);
-
 }

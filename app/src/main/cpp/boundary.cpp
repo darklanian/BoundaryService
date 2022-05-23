@@ -3,6 +3,7 @@
 //
 #include <vector>
 #include <cmath>
+#include <limits>
 
 #include <GLES3/gl32.h>
 
@@ -91,6 +92,67 @@ void load_boundary_geometry() {
 	LOGI("boundary vertex count: %d", (int)boundary_points.size()/3);
 }
 
+float get_distance_to_line(float x1, float y1, float x2, float y2, float x, float y, /*nearest point*/float* nx, float* ny) {
+	float theta = std::atanf((y2-y1)/(x2-x1)) - std::atan((y-y1)/(x-x1));
+	if (theta >= M_PI/2) {
+		if (nx)
+			*nx = x1;
+		if (ny)
+			*ny = y1;
+		return get_distance(x1, y1, x, y);
+	} else if (theta <= M_PI/4) {
+		if (nx)
+			*nx = x2;
+		if (ny)
+			*ny = y2;
+		return get_distance(x2, y2, x, y);
+	} else {
+		float a = (y2-y1);
+		float b = -(x2-x1);
+		float c = -(y2-y1)*x1 + (x2-x1)*y1;
+		float k = -(a*x+b*y+c)/(a*a+b*b);
+		if (nx)
+			*nx = x+a*k;
+		if (ny)
+			*ny = y+b*k;
+		return abs(a*x+b*y+c)/sqrt(a*a+b*b);
+	}
+}
+
+float get_distance_to_boundary(float x, float y, /*nearest point*/float* nx, float* ny) {
+	float min = std::numeric_limits<float>::max();
+	float x1 = boundary_points[0]; // x-z plane: x
+	float y1 = boundary_points[2]; // x-z plane: z
+	for (int i = 6; i < boundary_points.size()/6; ++i) {
+		float x2 = boundary_points[i*6]; // x-z plane: x
+		float y2 = boundary_points[i*6+2]; // x-z plane: z
+		float tx = 0.0f, ty = 0.0f;
+		float d = get_distance_to_line(x1, y1, x2, y2, x, y, &tx, &ty);
+		if (d < min) {
+			min = d;
+			if (nx)
+				*nx = tx;
+			if (ny)
+				*ny = ty;
+		}
+		x1 = x2;
+		y1 = y2;
+	}
+
+	return min;
+}
+
+XrVector3f head_position = {0.0f, 0.0f, 0.0f};
+XrVector3f nearest_point = {0.0f, 0.0f, 0.0f};
+float distance_to_boundary = 0.0f;
+
+void boundary_set_head_position(XrVector3f hp) {
+	head_position = hp;
+	distance_to_boundary = get_distance_to_boundary(hp.x, hp.z, &nearest_point.x, &nearest_point.z);
+	LOGI("DEBUG: distance_to_boundary: %f", distance_to_boundary);
+	nearest_point.y = boundary_bottom;
+}
+
 void boundary_init(AAssetManager* am) {
 	program_grid = create_program(am, "grid.vertex.shader", "grid.fragment.shader");
 	program_surface = create_program(am, "surface.vertex.shader", "surface.fragment.shader");
@@ -128,15 +190,18 @@ void boundary_deinit() {
 }
 
 void boundary_draw_grid(XrMatrix4x4f vp) {
+	glEnable(GL_BLEND);
+
 	glUseProgram(program_grid);
 
 	glUniformMatrix4fv(2, 1, GL_FALSE, reinterpret_cast<const GLfloat*>(&vp));
-	float handPosition[] = {0.0f, 0.0f, hand_z};
-	glUniform3fv(3, 1, handPosition);
+	glUniform1f(3, distance_to_boundary);
 
 	glBindVertexArray(boundary_vao);
 	glDrawArrays(GL_TRIANGLE_STRIP, 0, boundary_points.size() / 3);
 	glBindVertexArray(0);
+
+	glDisable(GL_BLEND);
 }
 
 float c_white[] = {1.0f, 1.0f, 1.0f, 1.0f};
@@ -186,6 +251,26 @@ void boundary_draw_surface(XrMatrix4x4f vp) {
 	glUniformMatrix4fv(2, 1, GL_FALSE, reinterpret_cast<const GLfloat*>(&vp));
 	glUniform4fv(color_location, 1, c_white);
 
+	// ---------------------------------------------------------------------------------------------
+	//LOGI("distance to boundary: %f, nearest point: %.2f,%.2f", d, nx, ny);
+	float line_vertices[] = {
+		head_position.x, boundary_bottom, head_position.z,
+		nearest_point.x, boundary_bottom, nearest_point.z,
+	};
+	GLuint vbo;
+	glGenBuffers(1, &vbo);
+	glBindBuffer(GL_ARRAY_BUFFER, vbo);
+	glBufferData(GL_ARRAY_BUFFER, sizeof(line_vertices), line_vertices, GL_STATIC_DRAW);
+	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, (void*)0);
+	glEnableVertexAttribArray(0);
+
+	glLineWidth(10.0f);
+	glDrawArrays(GL_LINES, 0, 2);
+
+	glBindBuffer(GL_VERTEX_ARRAY, 0);
+	glDeleteBuffers(1, &vbo);
+	// ---------------------------------------------------------------------------------------------
+
 	glDepthFunc(GL_LESS);
 	glEnable(GL_DEPTH_TEST);
 	glDepthMask(GL_TRUE);
@@ -202,18 +287,4 @@ void boundary_draw_surface(XrMatrix4x4f vp) {
 
 	glUniform4fv(color_location, 1, c_transparent);
 	draw_sphere_on_surface(vp, 3.5f);
-
-	/*glClear(GL_DEPTH_BUFFER_BIT);
-	glUniform4fv(color_location, 1, c_green);
-	float s = 1.0f;
-	XrVector3f translation {0.0f, 0.0f, hand_z};
-	XrQuaternionf rotation {0.0f, 0.0f, 0.0f, 1.0f};
-	XrVector3f scale {s, s, s};
-	XrMatrix4x4f model;
-	XrMatrix4x4f_CreateTranslationRotationScale(&model, &translation, &rotation, &scale);
-	XrMatrix4x4f mvp;
-	XrMatrix4x4f_Multiply(&mvp, &vp, &model);
-	glUniformMatrix4fv(2, 1, GL_FALSE, reinterpret_cast<const GLfloat*>(&mvp));
-	sphere_draw();*/
-
 }

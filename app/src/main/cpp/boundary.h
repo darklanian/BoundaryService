@@ -9,5 +9,6 @@ void boundary_init(AAssetManager* am);
 void boundary_deinit();
 void boundary_draw_grid(XrMatrix4x4f vp);
 void boundary_draw_surface(XrMatrix4x4f vp);
+void boundary_set_head_position(XrVector3f hp);
 
 #endif //BOUNDARYSERVICE_BOUNDARY_H

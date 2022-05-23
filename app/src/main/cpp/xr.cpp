@@ -13,6 +13,8 @@
 #include "common/gfxwrapper_opengl.h"
 #include <common/xr_linear.h>
 
+#include "boundary.h"
+
 namespace Math {
     namespace Pose {
         XrPosef Identity() {
@@ -28,6 +30,7 @@ XrInstance instance{XR_NULL_HANDLE};
 XrSystemId systemId{XR_NULL_SYSTEM_ID};
 XrSession session{XR_NULL_HANDLE};
 XrSpace appSpace{XR_NULL_HANDLE};
+XrSpace headSpace{XR_NULL_HANDLE};
 std::vector<XrViewConfigurationView> configViews;
 std::vector<XrView> views;
 std::vector<Swapchain> swapchains;
@@ -123,6 +126,9 @@ static void xr_create_session() {
     referenceSpaceCreateInfo.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_LOCAL;
     referenceSpaceCreateInfo.next = nullptr;
     xrCreateReferenceSpace(session, &referenceSpaceCreateInfo, &appSpace);
+
+	referenceSpaceCreateInfo.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_VIEW;
+	xrCreateReferenceSpace(session, &referenceSpaceCreateInfo, &headSpace);
 }
 
 static void xr_create_swapchain() {
@@ -277,6 +283,10 @@ static bool xr_render_layer(XrTime predictedDisplayTime, std::vector<XrCompositi
     }
 
     projectionLayerViews.resize(viewCountOutput);
+
+    XrSpaceLocation spaceLocation{XR_TYPE_SPACE_LOCATION};
+    xrLocateSpace(headSpace, appSpace, predictedDisplayTime, &spaceLocation);
+    boundary_set_head_position(spaceLocation.pose.position);
 
     // Render view to the appropriate part of the swapchain image.
     for (uint32_t i = 0; i < viewCountOutput; i++) {
