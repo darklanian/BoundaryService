@@ -3,6 +3,7 @@
 #include <EGL/egl.h>
 #include <GLES3/gl32.h>
 
+#include <initializer_list>
 #include <cstring>
 #include <map>
 
@@ -25,12 +26,19 @@ namespace Math {
     }  // namespace Pose
 }  // namespace Math
 
+#define strcpy_s(dest, source) strncpy((dest), (source), sizeof(dest))
+
 GLuint swapchainFramebuffer;
 XrInstance instance{XR_NULL_HANDLE};
 XrSystemId systemId{XR_NULL_SYSTEM_ID};
 XrSession session{XR_NULL_HANDLE};
 XrSpace appSpace{XR_NULL_HANDLE};
 XrSpace headSpace{XR_NULL_HANDLE};
+XrActionSet actionSet{XR_NULL_HANDLE};
+XrPath handSubactionPath[2];
+XrPath posePath[2];
+XrAction poseAction;
+XrSpace handSpace[2];
 std::vector<XrViewConfigurationView> configViews;
 std::vector<XrView> views;
 std::vector<Swapchain> swapchains;
@@ -55,6 +63,20 @@ static void xr_initialize_loader(void* vm, void *activity) {
     }
 }
 
+void xr_suggest_interaction_profile_bindings(const char *path_string) {
+	XrPath path;
+	xrStringToPath(instance, path_string, &path);
+	std::vector<XrActionSuggestedBinding> bindings{{// Fall back to a click input for the grab action.
+													   {poseAction, posePath[0]},
+													   {poseAction, posePath[1]},
+													   }};
+	XrInteractionProfileSuggestedBinding suggestedBindings{XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING};
+	suggestedBindings.interactionProfile = path;
+	suggestedBindings.suggestedBindings = bindings.data();
+	suggestedBindings.countSuggestedBindings = (uint32_t)bindings.size();
+	xrSuggestInteractionProfileBindings(instance, &suggestedBindings);
+}
+
 static void xr_initialize_system() {
     XrSystemGetInfo systemInfo{XR_TYPE_SYSTEM_GET_INFO};
     systemInfo.formFactor = XR_FORM_FACTOR_HEAD_MOUNTED_DISPLAY;
@@ -68,6 +90,8 @@ static void xr_initialize_system() {
 
     XrGraphicsRequirementsOpenGLESKHR graphicsRequirements{XR_TYPE_GRAPHICS_REQUIREMENTS_OPENGL_ES_KHR};
     pfnGetOpenGLESGraphicsRequirementsKHR(instance, systemId, &graphicsRequirements);
+
+
 }
 
 static void xr_create_instance(void* vm, void *activity) {
@@ -97,6 +121,48 @@ static void xr_create_instance(void* vm, void *activity) {
         LOGE("xrCreateInstance failed");
     }
     xr_initialize_system();
+}
+
+static void initialize_actions() {
+	XrActionSetCreateInfo actionSetInfo{XR_TYPE_ACTION_SET_CREATE_INFO};
+	strcpy_s(actionSetInfo.actionSetName, "boundary");
+	strcpy_s(actionSetInfo.localizedActionSetName, "boundary");
+	actionSetInfo.priority = 1000;
+	xrCreateActionSet(instance, &actionSetInfo, &actionSet);
+
+	// Get the XrPath for the left and right hands - we will use them as subaction paths.
+	xrStringToPath(instance, "/user/hand/left", &handSubactionPath[0]);
+	xrStringToPath(instance, "/user/hand/right", &handSubactionPath[1]);
+
+	XrActionCreateInfo actionInfo{XR_TYPE_ACTION_CREATE_INFO};
+	actionInfo.actionType = XR_ACTION_TYPE_POSE_INPUT;
+	strcpy_s(actionInfo.actionName, "hand_pose");
+	strcpy_s(actionInfo.localizedActionName, "Hand Pose");
+	actionInfo.countSubactionPaths = 2;
+	actionInfo.subactionPaths = handSubactionPath;
+	xrCreateAction(actionSet, &actionInfo, &poseAction);
+
+	xrStringToPath(instance, "/user/hand/left/input/grip/pose", &posePath[0]);
+	xrStringToPath(instance, "/user/hand/right/input/grip/pose", &posePath[1]);
+
+	xr_suggest_interaction_profile_bindings("/interaction_profiles/khr/simple_controller");
+	xr_suggest_interaction_profile_bindings("/interaction_profiles/oculus/touch_controller");
+	xr_suggest_interaction_profile_bindings("/interaction_profiles/htc/vive_controller");
+	xr_suggest_interaction_profile_bindings("/interaction_profiles/valve/index_controller");
+	xr_suggest_interaction_profile_bindings("/interaction_profiles/microsoft/motion_controller");
+
+	XrActionSpaceCreateInfo actionSpaceInfo{XR_TYPE_ACTION_SPACE_CREATE_INFO};
+	actionSpaceInfo.action = poseAction;
+	actionSpaceInfo.poseInActionSpace.orientation.w = 1.f;
+	actionSpaceInfo.subactionPath = handSubactionPath[0];
+	xrCreateActionSpace(session, &actionSpaceInfo, &handSpace[0]);
+	actionSpaceInfo.subactionPath = handSubactionPath[1];
+	xrCreateActionSpace(session, &actionSpaceInfo, &handSpace[1]);
+
+	XrSessionActionSetsAttachInfo attachInfo{XR_TYPE_SESSION_ACTION_SETS_ATTACH_INFO};
+	attachInfo.countActionSets = 1;
+	attachInfo.actionSets = &actionSet;
+	xrAttachSessionActionSets(session, &attachInfo);
 }
 
 static void xr_create_session() {
@@ -129,6 +195,8 @@ static void xr_create_session() {
 
 	referenceSpaceCreateInfo.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_VIEW;
 	xrCreateReferenceSpace(session, &referenceSpaceCreateInfo, &headSpace);
+
+	initialize_actions();
 }
 
 static void xr_create_swapchain() {
@@ -287,6 +355,19 @@ static bool xr_render_layer(XrTime predictedDisplayTime, std::vector<XrCompositi
     XrSpaceLocation spaceLocation{XR_TYPE_SPACE_LOCATION};
     xrLocateSpace(headSpace, appSpace, predictedDisplayTime, &spaceLocation);
     boundary_set_head_position(spaceLocation.pose.position);
+
+    if (XR_UNQUALIFIED_SUCCESS(xrLocateSpace(handSpace[0], appSpace, predictedDisplayTime, &spaceLocation))) {
+        if ((spaceLocation.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT) != 0 &&
+            (spaceLocation.locationFlags & XR_SPACE_LOCATION_ORIENTATION_VALID_BIT) != 0) {
+            boundary_set_hand_position(spaceLocation.pose.position, 0);
+        }
+    }
+	if (XR_UNQUALIFIED_SUCCESS(xrLocateSpace(handSpace[1], appSpace, predictedDisplayTime, &spaceLocation))) {
+        if ((spaceLocation.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT) != 0 &&
+            (spaceLocation.locationFlags & XR_SPACE_LOCATION_ORIENTATION_VALID_BIT) != 0) {
+            boundary_set_hand_position(spaceLocation.pose.position, 1);
+        }
+    }
 
     // Render view to the appropriate part of the swapchain image.
     for (uint32_t i = 0; i < viewCountOutput; i++) {

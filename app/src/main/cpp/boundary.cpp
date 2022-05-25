@@ -18,7 +18,7 @@
 
 float boundary_bottom = -10.0f;
 float boundary_height = 30.0f;
-float boundary_scale = 30.0f;
+float boundary_scale = 20.0f;
 
 std::vector<float> boundary_points;
 std::vector<float> boundary_uv;
@@ -143,14 +143,33 @@ float get_distance_to_boundary(float x, float y, /*nearest point*/float* nx, flo
 }
 
 XrVector3f head_position = {0.0f, 0.0f, 0.0f};
+XrVector3f hand_position[2] = {
+	{0.0f, 0.0f, 0.0f},
+	{0.0f, 0.0f, 0.0f},
+};
 XrVector3f nearest_point = {0.0f, 0.0f, 0.0f};
 float distance_to_boundary = 0.0f;
 
 void boundary_set_head_position(XrVector3f hp) {
 	head_position = hp;
 	distance_to_boundary = get_distance_to_boundary(hp.x, hp.z, &nearest_point.x, &nearest_point.z);
-	LOGI("DEBUG: distance_to_boundary: %f", distance_to_boundary);
+	//LOGI("DEBUG: head: %f,%f,%f", hp.x, hp.y, hp.z);
+	//LOGI("DEBUG: distance_to_boundary: %f", distance_to_boundary);
 	nearest_point.y = boundary_bottom;
+}
+
+void boundary_set_hand_position(XrVector3f hp, int hand) {
+	hand_position[hand] = hp;
+	hand_position[hand].z += hand_z;
+	float d, nx, ny;
+	d = get_distance_to_boundary(hp.x, hp.z, &nx, &ny);
+	LOGI("DEBUG: hand[%d]: %f,%f,%f", hand, hp.x, hp.y, hp.z);
+	if (d < distance_to_boundary) {
+		distance_to_boundary = d;
+		nearest_point.x = nx;
+		nearest_point.y = boundary_bottom;
+		nearest_point.z = ny;
+	}
 }
 
 void boundary_init(AAssetManager* am) {
@@ -210,12 +229,11 @@ float c_green[] = {0.0f, 1.0f, 0.0f, 1.0f};
 float c_blue[] = {0.0f, 0.0f, 1.0f, 1.0f};
 float c_transparent[] = {0.0f, 0.0f, 0.0f, 0.0f};
 
-void draw_sphere_on_surface(XrMatrix4x4f vp, float s) {
-	XrVector3f translation {0.0f, 0.0f, hand_z};
+void draw_sphere_on_surface(XrMatrix4x4f vp, float s, XrVector3f position) {
 	XrQuaternionf rotation {0.0f, 0.0f, 0.0f, 1.0f};
 	XrVector3f scale {s, s, s};
 	XrMatrix4x4f model;
-	XrMatrix4x4f_CreateTranslationRotationScale(&model, &translation, &rotation, &scale);
+	XrMatrix4x4f_CreateTranslationRotationScale(&model, &position, &rotation, &scale);
 	XrMatrix4x4f mvp;
 	XrMatrix4x4f_Multiply(&mvp, &vp, &model);
 	glUniformMatrix4fv(2, 1, GL_FALSE, reinterpret_cast<const GLfloat*>(&mvp));
@@ -245,6 +263,15 @@ void draw_sphere_on_surface(XrMatrix4x4f vp, float s) {
 	glClear(GL_STENCIL_BUFFER_BIT);
 }
 
+void boundary_draw_hole(XrMatrix4x4f vp, float size, float *color, XrVector3f position) {
+
+	glUniform4fv(color_location, 1, color);
+	draw_sphere_on_surface(vp, size, position);
+
+	glUniform4fv(color_location, 1, c_transparent);
+	draw_sphere_on_surface(vp, size*0.9f, position);
+}
+
 void boundary_draw_surface(XrMatrix4x4f vp) {
 	glUseProgram(program_surface);
 
@@ -253,7 +280,7 @@ void boundary_draw_surface(XrMatrix4x4f vp) {
 
 	// ---------------------------------------------------------------------------------------------
 	//LOGI("distance to boundary: %f, nearest point: %.2f,%.2f", d, nx, ny);
-	float line_vertices[] = {
+	/*float line_vertices[] = {
 		head_position.x, boundary_bottom, head_position.z,
 		nearest_point.x, boundary_bottom, nearest_point.z,
 	};
@@ -268,7 +295,7 @@ void boundary_draw_surface(XrMatrix4x4f vp) {
 	glDrawArrays(GL_LINES, 0, 2);
 
 	glBindBuffer(GL_VERTEX_ARRAY, 0);
-	glDeleteBuffers(1, &vbo);
+	glDeleteBuffers(1, &vbo);*/
 	// ---------------------------------------------------------------------------------------------
 
 	glDepthFunc(GL_LESS);
@@ -282,9 +309,7 @@ void boundary_draw_surface(XrMatrix4x4f vp) {
 	glBindVertexArray(0);
 	// boundary wall done
 
-	glUniform4fv(color_location, 1, c_red);
-	draw_sphere_on_surface(vp, 4.0f);
-
-	glUniform4fv(color_location, 1, c_transparent);
-	draw_sphere_on_surface(vp, 3.5f);
+	boundary_draw_hole(vp, 4.0f, c_white, head_position);
+	boundary_draw_hole(vp, 0.2f, c_red, hand_position[0]);
+	boundary_draw_hole(vp, 1.0f, c_green, hand_position[1]);
 }

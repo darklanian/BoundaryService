@@ -10,5 +10,6 @@ void boundary_deinit();
 void boundary_draw_grid(XrMatrix4x4f vp);
 void boundary_draw_surface(XrMatrix4x4f vp);
 void boundary_set_head_position(XrVector3f hp);
+void boundary_set_hand_position(XrVector3f hp, int hand);
 
 #endif //BOUNDARYSERVICE_BOUNDARY_H
