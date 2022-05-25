@@ -153,7 +153,7 @@ float distance_to_boundary = 0.0f;
 void boundary_set_head_position(XrVector3f hp) {
 	head_position = hp;
 	distance_to_boundary = get_distance_to_boundary(hp.x, hp.z, &nearest_point.x, &nearest_point.z);
-	//LOGI("DEBUG: head: %f,%f,%f", hp.x, hp.y, hp.z);
+	LOGI("DEBUG: head: %f,%f,%f", hp.x, hp.y, hp.z);
 	//LOGI("DEBUG: distance_to_boundary: %f", distance_to_boundary);
 	nearest_point.y = boundary_bottom;
 }
@@ -310,6 +310,6 @@ void boundary_draw_surface(XrMatrix4x4f vp) {
 	// boundary wall done
 
 	boundary_draw_hole(vp, 4.0f, c_white, head_position);
-	boundary_draw_hole(vp, 0.2f, c_red, hand_position[0]);
-	boundary_draw_hole(vp, 1.0f, c_green, hand_position[1]);
+	//boundary_draw_hole(vp, 0.2f, c_red, hand_position[0]);
+	//boundary_draw_hole(vp, 1.0f, c_green, hand_position[1]);
 }

@@ -23,6 +23,11 @@ namespace Math {
             t.orientation.w = 1;
             return t;
         }
+        XrPosef Translation(const XrVector3f& translation) {
+            XrPosef t = Identity();
+            t.position = translation;
+            return t;
+        }
     }  // namespace Pose
 }  // namespace Math
 
@@ -194,6 +199,7 @@ static void xr_create_session() {
     xrCreateReferenceSpace(session, &referenceSpaceCreateInfo, &appSpace);
 
 	referenceSpaceCreateInfo.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_VIEW;
+    referenceSpaceCreateInfo.poseInReferenceSpace = Math::Pose::Translation({0.f, 0.f, -4.0f});
 	xrCreateReferenceSpace(session, &referenceSpaceCreateInfo, &headSpace);
 
 	initialize_actions();
@@ -317,7 +323,7 @@ static void xr_render_view(const XrCompositionLayerProjectionView& layerView, Xr
 
     const auto& pose = layerView.pose;
     XrMatrix4x4f proj;
-    XrMatrix4x4f_CreateProjectionFov(&proj, GRAPHICS_OPENGL_ES, layerView.fov, 0.05f, 100.0f);
+    XrMatrix4x4f_CreateProjectionFov(&proj, GRAPHICS_OPENGL_ES, layerView.fov, 0.001f, 100.0f);
     XrMatrix4x4f toView;
     XrVector3f scale{1.f, 1.f, 1.f};
     XrMatrix4x4f_CreateTranslationRotationScale(&toView, &pose.position, &pose.orientation, &scale);
