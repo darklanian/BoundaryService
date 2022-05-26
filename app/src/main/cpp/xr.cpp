@@ -199,7 +199,7 @@ static void xr_create_session() {
     xrCreateReferenceSpace(session, &referenceSpaceCreateInfo, &appSpace);
 
 	referenceSpaceCreateInfo.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_VIEW;
-    referenceSpaceCreateInfo.poseInReferenceSpace = Math::Pose::Translation({0.f, 0.f, -4.0f});
+    referenceSpaceCreateInfo.poseInReferenceSpace = Math::Pose::Translation({0.f, 0.f, -0.3f});
 	xrCreateReferenceSpace(session, &referenceSpaceCreateInfo, &headSpace);
 
 	initialize_actions();

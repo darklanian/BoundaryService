@@ -16,9 +16,9 @@
 #include "shader.h"
 #include "sphere.h"
 
-float boundary_bottom = -10.0f;
-float boundary_height = 30.0f;
-float boundary_scale = 20.0f;
+float boundary_bottom = -1.7f;
+float boundary_height = 3.0f;
+float boundary_scale = 2.0f;
 
 std::vector<float> boundary_points;
 std::vector<float> boundary_uv;
@@ -73,9 +73,9 @@ void load_boundary_geometry() {
 			add_point(x, boundary_bottom, z);
 			add_point(x, boundary_bottom+boundary_height, z);
 			if (px != 0.0f && pz != 0.0f)
-				d += get_distance(px, pz, x, z);
+				d += get_distance(px, pz, x, z)*10.0f;
 			add_point_uv(d, 0.0f);
-			add_point_uv(d, boundary_height);
+			add_point_uv(d, boundary_height*10.0f);
 			px = x;
 			pz = z;
 		}
@@ -309,7 +309,7 @@ void boundary_draw_surface(XrMatrix4x4f vp) {
 	glBindVertexArray(0);
 	// boundary wall done
 
-	boundary_draw_hole(vp, 4.0f, c_white, head_position);
-	//boundary_draw_hole(vp, 0.2f, c_red, hand_position[0]);
-	//boundary_draw_hole(vp, 1.0f, c_green, hand_position[1]);
+	boundary_draw_hole(vp, 0.3f, c_white, head_position);
+	boundary_draw_hole(vp, 0.2f, c_red, hand_position[0]);
+	boundary_draw_hole(vp, 0.2f, c_green, hand_position[1]);
 }
