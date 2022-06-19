@@ -33,7 +33,11 @@ namespace Math {
 
 #define strcpy_s(dest, source) strncpy((dest), (source), sizeof(dest))
 
-GLuint swapchainFramebuffer;
+typedef struct {
+    GLuint swapchainFramebuffer;
+    std::vector<Swapchain> swapchains;
+    XrSwapchainImageOpenGLESKHR swapchainImages[2][3];
+} XrLayerSwapchain;
 XrInstance instance{XR_NULL_HANDLE};
 XrSystemId systemId{XR_NULL_SYSTEM_ID};
 XrSession session{XR_NULL_HANDLE};
@@ -46,13 +50,14 @@ XrAction poseAction;
 XrSpace handSpace[2];
 std::vector<XrViewConfigurationView> configViews;
 std::vector<XrView> views;
-std::vector<Swapchain> swapchains;
-XrSwapchainImageOpenGLESKHR swapchainImages[2][3];
+XrLayerSwapchain layerSwapchains[2];
 std::map<uint32_t, uint32_t> colorToDepthMap;
 XrEventDataBuffer eventDataBuffer;
 
 bool initialized = false;
 bool is_session_running = false;
+
+bool is_overlay = true;
 
 static void xr_initialize_loader(void* vm, void *activity) {
     PFN_xrInitializeLoaderKHR initializeLoader = nullptr;
@@ -105,7 +110,7 @@ static void xr_create_instance(void* vm, void *activity) {
     std::vector<const char*> extensions;
     extensions.push_back(XR_KHR_ANDROID_CREATE_INSTANCE_EXTENSION_NAME);
     extensions.push_back(XR_KHR_OPENGL_ES_ENABLE_EXTENSION_NAME);
-    extensions.push_back(XR_EXTX_OVERLAY_EXTENSION_NAME);
+    if (is_overlay) extensions.push_back(XR_EXTX_OVERLAY_EXTENSION_NAME);
 
     XrInstanceCreateInfoAndroidKHR instanceCreateInfoAndroid = {XR_TYPE_INSTANCE_CREATE_INFO_ANDROID_KHR};
     instanceCreateInfoAndroid.applicationVM = vm;
@@ -181,7 +186,7 @@ static void xr_create_session() {
     graphicsBinding.display = eglGetCurrentDisplay();
     graphicsBinding.config = (EGLConfig)0;
     graphicsBinding.context = eglGetCurrentContext();
-    graphicsBinding.next = &overlayInfo;
+    graphicsBinding.next = is_overlay ? &overlayInfo : nullptr;
 
     XrSessionCreateInfo createInfo{XR_TYPE_SESSION_CREATE_INFO};
     createInfo.next = &graphicsBinding;
@@ -205,7 +210,7 @@ static void xr_create_session() {
 	initialize_actions();
 }
 
-static void xr_create_swapchain() {
+static void xr_create_swapchain(XrLayerSwapchain *layerSwapchain) {
     // Query and cache view configuration views.
     uint32_t viewCount;
     xrEnumerateViewConfigurationViews(instance, systemId, XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO, 0, &viewCount, nullptr);
@@ -233,13 +238,19 @@ static void xr_create_swapchain() {
         swapchain.height = swapchainCreateInfo.height;
         xrCreateSwapchain(session, &swapchainCreateInfo, &swapchain.handle);
 
-        swapchains.push_back(swapchain);
+        layerSwapchain->swapchains.push_back(swapchain);
 
         uint32_t imageCount = 0;
         xrEnumerateSwapchainImages(swapchain.handle, 0, &imageCount, nullptr);
+        LOGI("imageCount=%d", imageCount);
         for (int j = 0; j < imageCount; j++)
-            swapchainImages[i][j].type = XR_TYPE_SWAPCHAIN_IMAGE_OPENGL_ES_KHR;
-        xrEnumerateSwapchainImages(swapchain.handle, imageCount, &imageCount, (XrSwapchainImageBaseHeader*)swapchainImages[i]);
+            layerSwapchain->swapchainImages[i][j].type = XR_TYPE_SWAPCHAIN_IMAGE_OPENGL_ES_KHR;
+        xrEnumerateSwapchainImages(swapchain.handle, imageCount, &imageCount, (XrSwapchainImageBaseHeader*)layerSwapchain->swapchainImages[i]);
+    }
+    for (int i = 0; i < 2; ++i) {
+        for (int j = 0; j < 3; ++j) {
+            LOGI("swapchainImages[%d][%d]=0x%X", i, j, layerSwapchain->swapchainImages[i][j].image);
+        }
     }
 }
 
@@ -247,11 +258,22 @@ void xr_init(void* vm, void* activity, AAssetManager* am) {
     if (initialized)
         return;
     xr_create_instance(vm, activity);
-    glGenFramebuffers(1, &swapchainFramebuffer);
+    glGenFramebuffers(1, &layerSwapchains[0].swapchainFramebuffer);
+    glGenFramebuffers(1, &layerSwapchains[1].swapchainFramebuffer);
     opengles_init(am);
     xr_create_session();
-    xr_create_swapchain();
+    xr_create_swapchain(&layerSwapchains[0]);
+    xr_create_swapchain(&layerSwapchains[1]);
     initialized = true;
+}
+
+void xr_destroy_swapchain(XrLayerSwapchain *layerSwapchain) {
+    for (Swapchain swapchain : layerSwapchain->swapchains) {
+        xrDestroySwapchain(swapchain.handle);
+    }
+    layerSwapchain->swapchains.clear();
+
+    glDeleteFramebuffers(1, &layerSwapchain->swapchainFramebuffer);
 }
 
 void xr_destroy() {
@@ -261,16 +283,12 @@ void xr_destroy() {
     initialized = false;
     is_session_running = false;
 
-    for (Swapchain swapchain : swapchains) {
-        xrDestroySwapchain(swapchain.handle);
-    }
-    swapchains.clear();
+    xr_destroy_swapchain(&layerSwapchains[0]);
+    xr_destroy_swapchain(&layerSwapchains[1]);
 
     if (appSpace != XR_NULL_HANDLE) xrDestroySpace(appSpace);
     if (session != XR_NULL_HANDLE) xrDestroySession(session);
     if (instance != XR_NULL_HANDLE) xrDestroyInstance(instance);
-
-    glDeleteFramebuffers(1, &swapchainFramebuffer);
 
     for (auto& colorToDepth : colorToDepthMap) {
         if (colorToDepth.second != 0) {
@@ -312,7 +330,7 @@ uint32_t GetDepthTexture(uint32_t colorTexture) {
 }
 
 static void xr_render_view(const XrCompositionLayerProjectionView& layerView, XrSwapchainImageOpenGLESKHR* swapchainImage){
-    glBindFramebuffer(GL_FRAMEBUFFER, swapchainFramebuffer);
+    glBindFramebuffer(GL_FRAMEBUFFER, layerSwapchains[0].swapchainFramebuffer);
 
     const uint32_t colorTexture = swapchainImage->image;
 
@@ -342,9 +360,44 @@ static void xr_render_view(const XrCompositionLayerProjectionView& layerView, Xr
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
+static void xr_render_dummy_view(const XrCompositionLayerProjectionView& layerView, XrSwapchainImageOpenGLESKHR* swapchainImage){
+    glBindFramebuffer(GL_FRAMEBUFFER, layerSwapchains[1].swapchainFramebuffer);
+
+    const uint32_t colorTexture = swapchainImage->image;
+
+    glViewport(static_cast<GLint>(layerView.subImage.imageRect.offset.x),
+               static_cast<GLint>(layerView.subImage.imageRect.offset.y),
+               static_cast<GLsizei>(layerView.subImage.imageRect.extent.width),
+               static_cast<GLsizei>(layerView.subImage.imageRect.extent.height));
+
+    const uint32_t depthTexture = GetDepthTexture(colorTexture);
+
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, colorTexture, 0);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_TEXTURE_2D, depthTexture, 0);
+
+    const auto& pose = layerView.pose;
+    XrMatrix4x4f proj;
+    XrMatrix4x4f_CreateProjectionFov(&proj, GRAPHICS_OPENGL_ES, layerView.fov, 0.001f, 100.0f);
+    XrMatrix4x4f toView;
+    XrVector3f scale{1.f, 1.f, 1.f};
+    XrMatrix4x4f_CreateTranslationRotationScale(&toView, &pose.position, &pose.orientation, &scale);
+    XrMatrix4x4f view;
+    XrMatrix4x4f_InvertRigidBody(&view, &toView);
+    XrMatrix4x4f vp;
+    XrMatrix4x4f_Multiply(&vp, &proj, &view);
+
+    //opengles_render_view(vp);
+    glClearColor(1.0f, 0.0f, 0.0f, 0.5f);
+    glClear(GL_COLOR_BUFFER_BIT);
+
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+}
+
 static bool xr_render_layer(XrTime predictedDisplayTime, std::vector<XrCompositionLayerProjectionView>& projectionLayerViews,
-                     XrCompositionLayerProjection& layer) {
+                            XrCompositionLayerProjection& layer) {
     XrResult res;
+
+    XrLayerSwapchain *layerSwapchain = &layerSwapchains[0];
 
     XrViewState viewState{XR_TYPE_VIEW_STATE};
     uint32_t viewCapacityInput = (uint32_t)views.size();
@@ -363,27 +416,10 @@ static bool xr_render_layer(XrTime predictedDisplayTime, std::vector<XrCompositi
 
     projectionLayerViews.resize(viewCountOutput);
 
-    XrSpaceLocation spaceLocation{XR_TYPE_SPACE_LOCATION};
-    xrLocateSpace(headSpace, appSpace, predictedDisplayTime, &spaceLocation);
-    boundary_set_head_position(spaceLocation.pose.position);
-
-    if (XR_UNQUALIFIED_SUCCESS(xrLocateSpace(handSpace[0], appSpace, predictedDisplayTime, &spaceLocation))) {
-        if ((spaceLocation.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT) != 0 &&
-            (spaceLocation.locationFlags & XR_SPACE_LOCATION_ORIENTATION_VALID_BIT) != 0) {
-            boundary_set_hand_position(spaceLocation.pose.position, 0);
-        }
-    }
-	if (XR_UNQUALIFIED_SUCCESS(xrLocateSpace(handSpace[1], appSpace, predictedDisplayTime, &spaceLocation))) {
-        if ((spaceLocation.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT) != 0 &&
-            (spaceLocation.locationFlags & XR_SPACE_LOCATION_ORIENTATION_VALID_BIT) != 0) {
-            boundary_set_hand_position(spaceLocation.pose.position, 1);
-        }
-    }
-
     // Render view to the appropriate part of the swapchain image.
     for (uint32_t i = 0; i < viewCountOutput; i++) {
         // Each view has a separate swapchain which is acquired, rendered to, and released.
-        const Swapchain viewSwapchain = swapchains[i];
+        const Swapchain viewSwapchain = layerSwapchain->swapchains[i];
 
         XrSwapchainImageAcquireInfo acquireInfo{XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO};
 
@@ -401,12 +437,67 @@ static bool xr_render_layer(XrTime predictedDisplayTime, std::vector<XrCompositi
         projectionLayerViews[i].subImage.imageRect.offset = {0, 0};
         projectionLayerViews[i].subImage.imageRect.extent = {viewSwapchain.width, viewSwapchain.height};
 
-        xr_render_view(projectionLayerViews[i], &swapchainImages[i][swapchainImageIndex]);
+        xr_render_view(projectionLayerViews[i], &layerSwapchain->swapchainImages[i][swapchainImageIndex]);
 
         XrSwapchainImageReleaseInfo releaseInfo{XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
         xrReleaseSwapchainImage(viewSwapchain.handle, &releaseInfo);
     }
     layer.space = appSpace;
+    layer.viewCount = (uint32_t)projectionLayerViews.size();
+    layer.views = projectionLayerViews.data();
+    return true;
+}
+
+static bool xr_render_dummy_layer(XrTime predictedDisplayTime, std::vector<XrCompositionLayerProjectionView>& projectionLayerViews,
+                     XrCompositionLayerProjection& layer) {
+    XrResult res;
+
+    XrLayerSwapchain *layerSwapchain = &layerSwapchains[1];
+
+    XrViewState viewState{XR_TYPE_VIEW_STATE};
+    uint32_t viewCapacityInput = (uint32_t)views.size();
+    uint32_t viewCountOutput;
+
+    XrViewLocateInfo viewLocateInfo{XR_TYPE_VIEW_LOCATE_INFO};
+    viewLocateInfo.viewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
+    viewLocateInfo.displayTime = predictedDisplayTime;
+    viewLocateInfo.space = headSpace;
+
+    res = xrLocateViews(session, &viewLocateInfo, &viewState, viewCapacityInput, &viewCountOutput, views.data());
+    if ((viewState.viewStateFlags & XR_VIEW_STATE_POSITION_VALID_BIT) == 0 ||
+        (viewState.viewStateFlags & XR_VIEW_STATE_ORIENTATION_VALID_BIT) == 0) {
+        return false;  // There is no valid tracking poses for the views.
+    }
+
+    projectionLayerViews.resize(viewCountOutput);
+
+    // Render view to the appropriate part of the swapchain image.
+    for (uint32_t i = 0; i < viewCountOutput; i++) {
+        // Each view has a separate swapchain which is acquired, rendered to, and released.
+        const Swapchain viewSwapchain = layerSwapchain->swapchains[i];
+
+        XrSwapchainImageAcquireInfo acquireInfo{XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO};
+
+        uint32_t swapchainImageIndex;
+        xrAcquireSwapchainImage(viewSwapchain.handle, &acquireInfo, &swapchainImageIndex);
+
+        XrSwapchainImageWaitInfo waitInfo{XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO};
+        waitInfo.timeout = XR_INFINITE_DURATION;
+        xrWaitSwapchainImage(viewSwapchain.handle, &waitInfo);
+
+        projectionLayerViews[i] = {XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW};
+        projectionLayerViews[i].pose = views[i].pose;
+        projectionLayerViews[i].fov = views[i].fov;
+        projectionLayerViews[i].subImage.swapchain = viewSwapchain.handle;
+        projectionLayerViews[i].subImage.imageRect.offset = {0, 0};
+        projectionLayerViews[i].subImage.imageRect.extent = {viewSwapchain.width, viewSwapchain.height};
+
+        xr_render_dummy_view(projectionLayerViews[i], &layerSwapchain->swapchainImages[i][swapchainImageIndex]);
+
+        XrSwapchainImageReleaseInfo releaseInfo{XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
+        xrReleaseSwapchainImage(viewSwapchain.handle, &releaseInfo);
+    }
+    layer.space = headSpace;
     layer.viewCount = (uint32_t)projectionLayerViews.size();
     layer.views = projectionLayerViews.data();
     return true;
@@ -420,16 +511,48 @@ void xr_render_frame() {
     XrFrameBeginInfo frameBeginInfo{XR_TYPE_FRAME_BEGIN_INFO};
     xrBeginFrame(session, &frameBeginInfo);
 
-    std::vector<XrCompositionLayerBaseHeader*> layers;
-    XrCompositionLayerProjection layer{
-        .type = XR_TYPE_COMPOSITION_LAYER_PROJECTION,
-        .layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT | XR_COMPOSITION_LAYER_UNPREMULTIPLIED_ALPHA_BIT};
-    std::vector<XrCompositionLayerProjectionView> projectionLayerViews;
-    if (frameState.shouldRender == XR_TRUE) {
-        if (xr_render_layer(frameState.predictedDisplayTime, projectionLayerViews, layer)) {
-            layers.push_back(reinterpret_cast<XrCompositionLayerBaseHeader*>(&layer));
+    XrSpaceLocation spaceLocation{XR_TYPE_SPACE_LOCATION};
+    xrLocateSpace(headSpace, appSpace, frameState.predictedDisplayTime, &spaceLocation);
+    boundary_set_head_position(spaceLocation.pose.position);
+
+    if (XR_UNQUALIFIED_SUCCESS(xrLocateSpace(handSpace[0], appSpace, frameState.predictedDisplayTime, &spaceLocation))) {
+        if ((spaceLocation.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT) != 0 &&
+            (spaceLocation.locationFlags & XR_SPACE_LOCATION_ORIENTATION_VALID_BIT) != 0) {
+            boundary_set_hand_position(spaceLocation.pose.position, 0);
         }
     }
+    if (XR_UNQUALIFIED_SUCCESS(xrLocateSpace(handSpace[1], appSpace, frameState.predictedDisplayTime, &spaceLocation))) {
+        if ((spaceLocation.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT) != 0 &&
+            (spaceLocation.locationFlags & XR_SPACE_LOCATION_ORIENTATION_VALID_BIT) != 0) {
+            boundary_set_hand_position(spaceLocation.pose.position, 1);
+        }
+    }
+
+    std::vector<XrCompositionLayerBaseHeader*> layers;
+    XrCompositionLayerProjection layer1{
+            .type = XR_TYPE_COMPOSITION_LAYER_PROJECTION,
+            .layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT | XR_COMPOSITION_LAYER_UNPREMULTIPLIED_ALPHA_BIT};
+    std::vector<XrCompositionLayerProjectionView> projectionLayerViews1;
+    bool layer1_valid = false;
+    XrCompositionLayerProjection layer2{
+            .type = XR_TYPE_COMPOSITION_LAYER_PROJECTION,
+            .layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT | XR_COMPOSITION_LAYER_UNPREMULTIPLIED_ALPHA_BIT};
+    std::vector<XrCompositionLayerProjectionView> projectionLayerViews2;
+    bool layer2_valid = false;
+    if (frameState.shouldRender == XR_TRUE) {
+
+        if (xr_render_dummy_layer(frameState.predictedDisplayTime, projectionLayerViews1, layer1)) {
+            layer1_valid = true;
+        }
+    }
+    if (frameState.shouldRender == XR_TRUE) {
+
+        if (xr_render_layer(frameState.predictedDisplayTime, projectionLayerViews2, layer2)) {
+            layer2_valid = true;
+        }
+    }
+    if (layer1_valid) layers.push_back(reinterpret_cast<XrCompositionLayerBaseHeader*>(&layer1));
+    if (layer2_valid) layers.push_back(reinterpret_cast<XrCompositionLayerBaseHeader*>(&layer2));
 
     XrFrameEndInfo frameEndInfo{XR_TYPE_FRAME_END_INFO};
     frameEndInfo.displayTime = frameState.predictedDisplayTime;

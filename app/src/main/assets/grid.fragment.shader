@@ -9,7 +9,7 @@ void main() {
     vec4 transparent = vec4(0.0, 0.0, 0.0, 0.0);
     float min_proximity = 10.0;
     float max_proximity = 15.0;
-    float line_width_half = 0.05;
+    float line_width_half = 0.005;
     vec2 uv = st/5.0;
     vec2 mod = uv - floor(uv);
     if (proximity > max_proximity) {

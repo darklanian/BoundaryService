@@ -18,7 +18,7 @@
 
 float boundary_bottom = -1.7f;
 float boundary_height = 3.0f;
-float boundary_scale = 2.0f;
+float boundary_scale = 1.0f;
 
 std::vector<float> boundary_points;
 std::vector<float> boundary_uv;
