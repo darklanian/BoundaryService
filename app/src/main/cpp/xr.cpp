@@ -258,9 +258,13 @@ void xr_destroy() {
     if (!initialized)
         return;
 
+    initialized = false;
+    is_session_running = false;
+
     for (Swapchain swapchain : swapchains) {
         xrDestroySwapchain(swapchain.handle);
     }
+    swapchains.clear();
 
     if (appSpace != XR_NULL_HANDLE) xrDestroySpace(appSpace);
     if (session != XR_NULL_HANDLE) xrDestroySession(session);
@@ -273,6 +277,7 @@ void xr_destroy() {
             glDeleteTextures(1, &colorToDepth.second);
         }
     }
+    colorToDepthMap.clear();
 
     opengles_deinit();
 }

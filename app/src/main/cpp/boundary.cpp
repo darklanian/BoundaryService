@@ -60,6 +60,9 @@ void load_boundary_geometry() {
 	if (fp == nullptr)
 		return;
 
+	boundary_points.clear();
+	boundary_uv.clear();
+
 	float x, z;
 	char* line = nullptr;
 	size_t len;
@@ -153,7 +156,7 @@ float distance_to_boundary = 0.0f;
 void boundary_set_head_position(XrVector3f hp) {
 	head_position = hp;
 	distance_to_boundary = get_distance_to_boundary(hp.x, hp.z, &nearest_point.x, &nearest_point.z);
-	LOGI("DEBUG: head: %f,%f,%f", hp.x, hp.y, hp.z);
+	//LOGI("DEBUG: head: %f,%f,%f", hp.x, hp.y, hp.z);
 	//LOGI("DEBUG: distance_to_boundary: %f", distance_to_boundary);
 	nearest_point.y = boundary_bottom;
 }
@@ -163,7 +166,7 @@ void boundary_set_hand_position(XrVector3f hp, int hand) {
 	hand_position[hand].z += hand_z;
 	float d, nx, ny;
 	d = get_distance_to_boundary(hp.x, hp.z, &nx, &ny);
-	LOGI("DEBUG: hand[%d]: %f,%f,%f", hand, hp.x, hp.y, hp.z);
+	//LOGI("DEBUG: hand[%d]: %f,%f,%f", hand, hp.x, hp.y, hp.z);
 	if (d < distance_to_boundary) {
 		distance_to_boundary = d;
 		nearest_point.x = nx;
@@ -204,6 +207,9 @@ void boundary_deinit() {
 	glDeleteVertexArrays(1, &boundary_vao);
 	glDeleteProgram(program_grid);
 	glDeleteProgram(program_surface);
+
+	boundary_points.clear();
+	boundary_uv.clear();
 
 	sphere_deinit();
 }
